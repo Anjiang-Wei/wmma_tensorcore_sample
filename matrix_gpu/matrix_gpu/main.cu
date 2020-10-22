@@ -67,38 +67,38 @@ cudaError_t matrix_mul_add_cuda(const T *A, unsigned int a_row, unsigned int a_c
 	cudaStatus = cudaSetDevice(0);
 	if (cudaStatus != cudaSuccess) {
 		printf("cudaSetDevice failed!  Do you have a CUDA-capable GPU installed?");
-		goto Error;
+		//goto Error;
 	}
 
 	// Allocate GPU buffers for matrics
 	cudaStatus = cudaMalloc((void**)&dev_a, a_row * a_col * sizeof(T));
 	if (cudaStatus != cudaSuccess) {
 		printf("cudaMalloc failed!");
-		goto Error;
+		//goto Error;
 	}
 
 	cudaStatus = cudaMalloc((void**)&dev_b, b_row * b_col * sizeof(T));
 	if (cudaStatus != cudaSuccess) {
 		printf("cudaMalloc failed!");
-		goto Error;
+		//goto Error;
 	}
 
 	cudaStatus = cudaMalloc((void**)&dev_c, c_row * c_col * sizeof(T));
 	if (cudaStatus != cudaSuccess) {
 		printf("cudaMalloc failed!");
-		goto Error;
+		//goto Error;
 	}
 
 	cudaStatus = cudaMalloc((void**)&dev_ab, b_row * a_col * sizeof(T));
 	if (cudaStatus != cudaSuccess) {
 		printf("cudaMalloc failed!");
-		goto Error;
+		//goto Error;
 	}
 
 	cudaStatus = cudaMalloc((void**)&dev_r, c_row * c_col * sizeof(T));
 	if (cudaStatus != cudaSuccess) {
 		printf("cudaMalloc failed!");
-		goto Error;
+		//goto Error;
 	}
 
 
@@ -106,19 +106,19 @@ cudaError_t matrix_mul_add_cuda(const T *A, unsigned int a_row, unsigned int a_c
 	cudaStatus = cudaMemcpy(dev_a, A, a_row * a_col * sizeof(T), cudaMemcpyHostToDevice);
 	if (cudaStatus != cudaSuccess) {
 		printf("cudaMemcpy failed!");
-		goto Error;
+		//goto Error;
 	}
 
 	cudaStatus = cudaMemcpy(dev_b, B, b_row * b_col * sizeof(T), cudaMemcpyHostToDevice);
 	if (cudaStatus != cudaSuccess) {
 		printf("cudaMemcpy failed!");
-		goto Error;
+		//goto Error;
 	}
 
 	cudaStatus = cudaMemcpy(dev_c, C, c_row * c_col * sizeof(T), cudaMemcpyHostToDevice);
 	if (cudaStatus != cudaSuccess) {
 		printf("cudaMemcpy failed!");
-		goto Error;
+		//goto Error;
 	}
 
 	// Launch a kernel on the GPU
@@ -137,7 +137,7 @@ cudaError_t matrix_mul_add_cuda(const T *A, unsigned int a_row, unsigned int a_c
 	cudaStatus = cudaGetLastError();
 	if (cudaStatus != cudaSuccess) {
 		printf("addKernel launch failed: %s\n", cudaGetErrorString(cudaStatus));
-		goto Error;
+		//goto Error;
 	}
 
 	// cudaDeviceSynchronize waits for the kernel to finish, and returns
@@ -145,20 +145,20 @@ cudaError_t matrix_mul_add_cuda(const T *A, unsigned int a_row, unsigned int a_c
 	cudaStatus = cudaDeviceSynchronize();
 	if (cudaStatus != cudaSuccess) {
 		printf("cudaDeviceSynchronize returned error code %d after launching addKernel!\n", cudaStatus);
-		goto Error;
+		//goto Error;
 	}
 
 	// Copy output vector from GPU buffer to host memory.
 	cudaStatus = cudaMemcpy(AB, dev_ab, b_row * a_col * sizeof(T), cudaMemcpyDeviceToHost);
 	if (cudaStatus != cudaSuccess) {
 		printf("cudaMemcpy failed!");
-		goto Error;
+		//goto Error;
 	}
 
 	cudaStatus = cudaMemcpy(R, dev_r, c_row * c_col * sizeof(T), cudaMemcpyDeviceToHost);
 	if (cudaStatus != cudaSuccess) {
 		printf("cudaMemcpy failed!");
-		goto Error;
+		//goto Error;
 	}
 
 Error:
