@@ -5,6 +5,7 @@
 
 #include<iostream>
 #include<ctime>
+#include<string.h>
 
 #define A_ROW 3
 #define A_COL 2
