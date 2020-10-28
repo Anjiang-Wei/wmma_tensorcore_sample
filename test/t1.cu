@@ -31,15 +31,15 @@
 //__global__ void WMMAINT8()
 using namespace nvcuda;
 
-void InitMatrix(float * A, float *B, half *Ah, half *Bh, float *C)
+void InitMatrix(float * A, float *B, float *Ah, float *Bh, float *C)
 {
 	for (int i = 0; i < M_TOTAL*K_TOTAL; i++) {
 		A[i] = rand() % 1000 / 1000.0f;
-		Ah[i] = __float2half(A[i]);
+		Ah[i] = A[i];
 	}
 	for (int i = 0; i < K_TOTAL*N_TOTAL; i++) {
 		B[i] = rand() % 1000 / 1000.0f;
-		Bh[i] = __float2half(B[i]);
+		Bh[i] = B[i];
 	}
 	for (int i = 0; i < M_TOTAL*N_TOTAL; i++)
 		C[i] = rand() % 1000 / 1000.0f;
@@ -47,13 +47,13 @@ void InitMatrix(float * A, float *B, half *Ah, half *Bh, float *C)
 
 
 // Tensor core
-__global__ void WMMAF16TensorCore(half *A, half *B, float *C, float *D)
+__global__ void WMMAF16TensorCore(float *A, float *B, float *C, float *D)
 {
 	int ix = (blockIdx.x * blockDim.x + threadIdx.x) / WARP_SIZE;
 	int iy = (blockIdx.y * blockDim.y + threadIdx.y);
 
-	wmma::fragment<wmma::matrix_a, M, N, K, half, wmma::row_major> a_frag;
-	wmma::fragment<wmma::matrix_b, M, N, K, half, wmma::col_major> b_frag;
+	wmma::fragment<wmma::matrix_a, M, N, K, float, wmma::row_major> a_frag;
+	wmma::fragment<wmma::matrix_b, M, N, K, float, wmma::col_major> b_frag;
 	wmma::fragment<wmma::accumulator, M, N, K, float> ab_frag;
 	wmma::fragment<wmma::accumulator, M, N, K, float> c_frag;
 
@@ -91,7 +91,7 @@ __global__ void WMMAF16TensorCore(half *A, half *B, float *C, float *D)
 	}
 }
 
-cudaError_t CalcByWMMA(half *A, half *B, float *C, float *D)
+cudaError_t CalcByWMMA(float *A, float *B, float *C, float *D)
 {
 	cudaError_t cuda_status;
 	dim3 gridDim, blockDim;
@@ -128,10 +128,10 @@ cudaError_t CalcByWMMA(half *A, half *B, float *C, float *D)
 }
 
 // GPU version without Tensor Core
-__global__ void cuda_matrix_mul(const half *A, const half *B, float *R)
+__global__ void cuda_matrix_mul(const float *A, const float *B, float *R)
 {
 	int bId = blockIdx.y * gridDim.x + blockIdx.x;
-	float sum = __half2float(A[blockIdx.y* M_TOTAL + threadIdx.x] * B[threadIdx.x * N_TOTAL + blockIdx.x]);
+	float sum = (A[blockIdx.y* M_TOTAL + threadIdx.x] * B[threadIdx.x * N_TOTAL + blockIdx.x]);
 	__syncthreads();
 	//printf("Thread %d In block %d : R = %d, sum = %d\n", threadIdx.x, bId, temp, sum);
 	atomicAdd(&R[bId], sum);
@@ -147,7 +147,7 @@ __global__ void cuda_matrix_add(const float *A, const float *B, float *R)
 }
 
 
-cudaError_t CalcByCUDA(half *A, half *B, float *C, float *R)
+cudaError_t CalcByCUDA(float *A, float *B, float *C, float *R)
 {
 	cudaError_t cuda_status;
 	dim3 gridDim, blockDim;
@@ -230,15 +230,15 @@ int main()
 	float *hostD = (float*)malloc(sizeof(float) * M_TOTAL * N_TOTAL);
 
 	// Matrix on device
-	half *A;
-	half *B;
+	float *A;
+	float *B;
 	float *C;
 	float *D;
 	float *D2;
 
 	// CUDA Unified Memory 
-	cudaMallocManaged((void **)&A, sizeof(half) * M_TOTAL * K_TOTAL);
-	cudaMallocManaged((void **)&B, sizeof(half) * K_TOTAL * N_TOTAL);
+	cudaMallocManaged((void **)&A, sizeof(float) * M_TOTAL * K_TOTAL);
+	cudaMallocManaged((void **)&B, sizeof(float) * K_TOTAL * N_TOTAL);
 	cudaMallocManaged((void **)&C, sizeof(float) * M_TOTAL * N_TOTAL);
 	cudaMallocManaged((void **)&D, sizeof(float) * M_TOTAL * N_TOTAL);
 	cudaMallocManaged((void **)&D2, sizeof(float) * M_TOTAL * N_TOTAL);
