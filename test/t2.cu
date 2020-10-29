@@ -1,5 +1,5 @@
-// nvcc t1.cu -lcublas -lcurand -arch sm_80 -o t1
-// Row major
+// nvcc t2.cu -lcublas -lcurand -arch sm_80 -o t2
+// Col major
 #include <stdio.h>
 #include <curand.h>
 #include <cublas_v2.h>
@@ -40,15 +40,15 @@ const int WMMA_K = 16;
 
 
 __global__ void wmma_fp16(half* a, half* b, float* c, int M, int N, int K, float alpha, float beta) {
-  int lda = K;
-  int ldb = N;
-  int ldc = N;
+  int lda = M;
+  int ldb = K;
+  int ldc = M;
 
   int warpM = (blockIdx.x * blockDim.x + threadIdx.x) / warpSize;
   int warpN = (blockIdx.y * blockDim.y + threadIdx.y);
 
-  wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::row_major> a_frag;
-  wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::row_major> b_frag;
+  wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> a_frag;
+  wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> b_frag;
   wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frag;
   wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
 
@@ -62,8 +62,8 @@ __global__ void wmma_fp16(half* a, half* b, float* c, int M, int N, int K, float
     int bCol = warpN * WMMA_N;
 
     if (aRow < M && aCol < K && bRow < K && bCol < N) {
-      wmma::load_matrix_sync(a_frag, a + aRow * lda + aCol, lda);
-      wmma::load_matrix_sync(b_frag, b + bRow * lda + bCol, ldb);
+      wmma::load_matrix_sync(a_frag, a + aRow + aCol * lda, lda);
+      wmma::load_matrix_sync(b_frag, b + bRow + bCol * ldb, ldb);
 
       wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);
     }
@@ -73,11 +73,11 @@ __global__ void wmma_fp16(half* a, half* b, float* c, int M, int N, int K, float
   int cCol = warpN * WMMA_N;
 
   if (cRow < M && cCol < N) {
-    wmma::load_matrix_sync(c_frag, c + cRow * ldc + cCol, ldc, wmma::mem_row_major);
+    wmma::load_matrix_sync(c_frag, c + cRow + cCol * ldc, ldc, wmma::mem_col_major);
     for (int i = 0; i < c_frag.num_elements; ++i) {
       c_frag.x[i] = alpha * acc_frag.x[i] + beta * c_frag.x[i];
     }
-    wmma::store_matrix_sync(c + cRow * ldc + cCol, c_frag, ldc, wmma::mem_row_major);
+    wmma::store_matrix_sync(c + cRow + cCol * ldc, c_frag, ldc, wmma::mem_col_major);
   }
 }
 
@@ -87,20 +87,6 @@ __global__ void convertFp32ToFp16 (half* out, float* in, int n) {
   int stride = gridDim.x * blockDim.x;
   for (int i = idx; i < n; i += stride) {
     out[i] = (half)in[i];
-    // out[i] = half(i % 100);
-  }
-}
-
-
-__global__ void transpose(half* dst, half* src, int contiguous, int strided) {
-  int idx = blockDim.x * blockIdx.x + threadIdx.x;
-  int stride = gridDim.x * blockDim.x;
-  int n = contiguous * strided;
-  for (int i = idx; i < n; i += stride) {
-    int d_strided = i % contiguous;
-    int d_contiguous = i / contiguous;
-    int d_i = d_strided * strided + d_contiguous;
-    dst[d_i] = src[i];
   }
 }
 
@@ -110,15 +96,11 @@ int main(int argc, char* argv[]) {
   float* b_fp32;
   half* a_fp16;
   half* b_fp16;
-  // half* a_row_fp16;
-  // half* b_row_fp16;
 
   float* c;
   float* c_cublas;
   float* c_wmma;
 
-  // half* a_host;
-  // half* b_host;
   float* c_host_cublas;
   float* c_host_wmma;
 
@@ -149,15 +131,11 @@ int main(int argc, char* argv[]) {
   cudaErrCheck(cudaMalloc((void**)&b_fp32, MATRIX_N * MATRIX_K * sizeof(float)));
   cudaErrCheck(cudaMalloc((void**)&a_fp16, MATRIX_M * MATRIX_K * sizeof(half)));
   cudaErrCheck(cudaMalloc((void**)&b_fp16, MATRIX_N * MATRIX_K * sizeof(half)));
-  // cudaErrCheck(cudaMalloc((void**)&a_row_fp16, MATRIX_M * MATRIX_K * sizeof(half)));
-  // cudaErrCheck(cudaMalloc((void**)&b_row_fp16, MATRIX_N * MATRIX_K * sizeof(half)));
 
   cudaErrCheck(cudaMalloc((void**)&c, MATRIX_M * MATRIX_N * sizeof(float)));
   cudaErrCheck(cudaMalloc((void**)&c_cublas, MATRIX_M * MATRIX_N * sizeof(float)));
   cudaErrCheck(cudaMalloc((void**)&c_wmma, MATRIX_M * MATRIX_N * sizeof(float)));
 
-  // a_host = (half*)malloc(MATRIX_M * MATRIX_K * sizeof(half));
-  // b_host = (half*)malloc(MATRIX_N * MATRIX_K * sizeof(half));
   c_host_cublas = (float*)malloc(MATRIX_M * MATRIX_N * sizeof(float));
   c_host_wmma = (float*)malloc(MATRIX_M * MATRIX_N * sizeof(float));
 
@@ -169,43 +147,6 @@ int main(int argc, char* argv[]) {
 
   convertFp32ToFp16<<<(MATRIX_M * MATRIX_K + 255) / 256, 256, 0, stream1>>>(a_fp16, a_fp32, MATRIX_M * MATRIX_K);
   convertFp32ToFp16<<<(MATRIX_N * MATRIX_K + 255) / 256, 256, 0, stream2>>>(b_fp16, b_fp32, MATRIX_N * MATRIX_K);
-
-  // cudaErrCheck(cudaMemcpy(a_host, a_fp16, MATRIX_M * MATRIX_K * sizeof(half), cudaMemcpyDeviceToHost));
-  // cudaErrCheck(cudaMemcpy(b_host, b_fp16, MATRIX_N * MATRIX_K * sizeof(half), cudaMemcpyDeviceToHost));
-  // printf("\nA matrix before layout transpose:\n");
-  // for (int i = 0; i < MATRIX_M; ++i) {
-  //   for (int j = 0; j < MATRIX_K; ++j) {
-  //     printf("%f ", float(a_host[i + j * MATRIX_M]));
-  //   }
-  //   printf("\n");
-  // }
-  // printf("\nB matrix before layout transpose:\n");
-  // for (int i = 0; i < MATRIX_K; ++i) {
-  //   for (int j = 0; j < MATRIX_N; ++j) {
-  //     printf("%f ", float(b_host[i + j * MATRIX_K]));
-  //   }
-  //   printf("\n");
-  // }
-
-  // transpose<<<(MATRIX_M * MATRIX_K + 255) / 256, 256, 0, stream1>>>(a_row_fp16, a_fp16, MATRIX_M, MATRIX_K);
-  // transpose<<<(MATRIX_N * MATRIX_K + 255) / 256, 256, 0, stream2>>>(b_row_fp16, b_fp16, MATRIX_K, MATRIX_N);
-
-  // cudaErrCheck(cudaMemcpy(a_host, a_row_fp16, MATRIX_M * MATRIX_K * sizeof(half), cudaMemcpyDeviceToHost));
-  // cudaErrCheck(cudaMemcpy(b_host, b_row_fp16, MATRIX_N * MATRIX_K * sizeof(half), cudaMemcpyDeviceToHost));
-  // printf("\nA matrix after layout transpose:\n");
-  // for (int i = 0; i < MATRIX_M; ++i) {
-  //   for (int j = 0; j < MATRIX_K; ++j) {
-  //     printf("%f ", float(a_host[i * MATRIX_K + j]));
-  //   }
-  //   printf("\n");
-  // }
-  // printf("\nB matrix after layout transpose:\n");
-  // for (int i = 0; i < MATRIX_K; ++i) {
-  //   for (int j = 0; j < MATRIX_N; ++j) {
-  //     printf("%f ", float(b_host[i * MATRIX_N + j]));
-  //   }
-  //   printf("\n");
-  // }
 
   curandErrCheck(curandGenerateUniform(gen, c, MATRIX_M * MATRIX_K));
   curandErrCheck(curandDestroyGenerator(gen));
@@ -235,12 +176,12 @@ int main(int argc, char* argv[]) {
   printf("Running with cuBLAS...\n");
   cudaErrCheck(cudaEventRecord(startcublas));
   cublasErrCheck(cublasGemmEx(cublasHandle, CUBLAS_OP_N, CUBLAS_OP_N,
-                              MATRIX_N, MATRIX_M, MATRIX_K,
+                              MATRIX_M, MATRIX_N, MATRIX_K,
                               &alpha,
-                              b_fp16, CUDA_R_16F, MATRIX_N,
-                              a_fp16, CUDA_R_16F, MATRIX_K,
+                              a_fp16, CUDA_R_16F, MATRIX_M,
+                              b_fp16, CUDA_R_16F, MATRIX_K,
                               &beta,
-                              c_cublas, CUDA_R_32F, MATRIX_N,
+                              c_cublas, CUDA_R_32F, MATRIX_M,
                               CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP
                             ));
   cudaErrCheck(cudaEventRecord(stopcublas));
@@ -248,28 +189,6 @@ int main(int argc, char* argv[]) {
   printf("\nChecking results...\n");
   cudaErrCheck(cudaMemcpy(c_host_wmma, c_wmma, MATRIX_M * MATRIX_N * sizeof(float), cudaMemcpyDeviceToHost));
   cudaErrCheck(cudaMemcpy(c_host_cublas, c_cublas, MATRIX_M * MATRIX_N * sizeof(float), cudaMemcpyDeviceToHost));
-  
-  // printf("\nResults of WMMA:\n");
-  // for (int i = 0; i < MATRIX_M; ++i) {
-  //   for (int j = 0; j < MATRIX_N; ++j) {
-  //     printf("%f ", c_host_wmma[i + j * MATRIX_M]);
-  //   }
-  //   printf("\n");
-  // }
-  // for (int i = 0; i < MATRIX_M * MATRIX_N; ++i)
-  //   printf("%f ", c_host_wmma[i]);
-  // printf("\n");
-
-  // printf("\nResults of cuBLAS:\n");
-  // for (int i = 0; i < MATRIX_M; ++i) {
-  //   for (int j = 0; j < MATRIX_N; ++j) {
-  //     printf("%f ", c_host_cublas[i * MATRIX_N + j]);
-  //   }
-  //   printf("\n");
-  // }
-  // for (int i = 0; i < MATRIX_M * MATRIX_N; ++i)
-  //   printf("%f ", c_host_cublas[i]);
-  // printf("\n");
   
   int errors = 0;
   for (int i = 0; i < MATRIX_M * MATRIX_N; i++) {
